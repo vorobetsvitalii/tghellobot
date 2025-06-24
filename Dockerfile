@@ -1,14 +1,17 @@
-# 1. Базовий образ з Python
 FROM python:3.11-slim
 
-# 2. Робоча директорія
 WORKDIR /app
 
-# 3. Встановлюємо залежність
-RUN pip install --no-cache-dir python-telegram-bot==20.6
+# Встановлюємо сертифікати для HTTPS
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
-# 4. Копіюємо весь ваш код і конфіги
+# Під час pip install вказуємо trusted-host
+RUN pip install --no-cache-dir \
+    --trusted-host pypi.org --trusted-host files.pythonhosted.org \
+    python-telegram-bot==20.6
+
 COPY . .
 
-# 5. Запускаємо бота
 CMD ["python", "main2.py"]
