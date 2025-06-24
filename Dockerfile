@@ -4,11 +4,10 @@ FROM python:3.11-slim
 # 2. Робоча директорія
 WORKDIR /app
 
-# 3. Копіюємо файл із залежностями й встановлюємо їх
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# 3. Встановлюємо залежність
+RUN pip install --no-cache-dir python-telegram-bot==20.6
 
-# 4. Копіюємо всі файли проєкту
+# 4. Копіюємо весь ваш код і конфіги
 COPY . .
 
 # 5. Запускаємо бота
