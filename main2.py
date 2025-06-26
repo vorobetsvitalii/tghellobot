@@ -21,7 +21,7 @@ from telegram.ext import (
 
 # ===== Конфігурація =====
 ADMIN_IDS = [1833581388, 7082906684]
-TOKEN = "7908611574:AAErbF2J55uZVWIRPzNDAIRsHBhPGthYvtE"
+TOKEN = "7733594700:AAGozxfK0w-tKRxGm5_sd_cpvF7QJ_xTDIs"
 CLIENTS_FILE = "clients.json"
 TEXT_FILE = "text.json"
 
@@ -81,25 +81,33 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def handle_interest_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get('awaiting_join'):
         return
-    choice = update.message.text.strip()
+
     cfg = load_json(TEXT_FILE)
-    if choice == cfg.get('confirm_button'):
+    choice = update.message.text.strip()
+    if choice == cfg['confirm_button']:
         clients = load_json(CLIENTS_FILE)
         uid = update.effective_user.id
         if not any(c['user_id'] == uid for c in clients['clients']):
             clients['clients'].append({'user_id': uid, 'username': update.effective_user.username or ''})
             save_json(CLIENTS_FILE, clients)
-    # Відправляємо меню з інлайн-кнопками та прибираємо клавіатуру
-    await update.message.reply_text(
-        cfg.get('message', ''),
-        reply_markup=ReplyKeyboardRemove()
-    )
-    btns = cfg.get('buttons', [])
-    if btns:
+
+    # підготуємо одне повідомлення
+    text = cfg['message']
+    buttons = cfg.get('buttons', [])
+
+    # знімаємо стару клавіатуру
+    markup = ReplyKeyboardRemove()
+
+    # якщо є inline-кнопки — будуємо InlineKeyboardMarkup
+    if buttons:
         inline_kb = InlineKeyboardMarkup(
-            [[InlineKeyboardButton(b['text'], url=b['url'])] for b in btns]
+            [[InlineKeyboardButton(b['text'], url=b['url'])] for b in buttons]
         )
-        await update.message.reply_text(cfg.get('message', ''), reply_markup=inline_kb)
+        markup = inline_kb
+
+    # відправляємо одне повідомлення з потрібним reply_markup
+    await update.message.reply_text(text, reply_markup=markup)
+
     context.user_data.pop('awaiting_join', None)
 
 # ===== Команди адміністраторів =====
