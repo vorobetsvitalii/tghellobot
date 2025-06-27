@@ -21,7 +21,7 @@ from telegram.ext import (
 
 # ===== Конфігурація =====
 ADMIN_IDS = [1833581388, 7082906684]
-TOKEN = "7733594700:AAGozxfK0w-tKRxGm5_sd_cpvF7QJ_xTDIs"
+TOKEN = "7908611574:AAErbF2J55uZVWIRPzNDAIRsHBhPGthYvtE"
 CLIENTS_FILE = "clients.json"
 TEXT_FILE = "text.json"
 
