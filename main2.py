@@ -115,13 +115,11 @@ async def handle_interest_response(update: Update, context: ContextTypes.DEFAULT
 # ===== Команди адміністраторів =====
 @admin_only
 async def list_clients_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    data = load_json(CLIENTS_FILE)['clients']
-    if not data:
-        return await update.message.reply_text("Клієнтів немає.")
-    lines = [f"🔸 Зареєстровано: {len(data)}"] + [
-        c['username'] or str(c['user_id']) for c in data
-    ]
-    await update.message.reply_text("\n".join(lines))
+    clients = load_json(CLIENTS_FILE)['clients']
+    count = len(clients)
+    text = f"🔸 Зареєстровано клієнтів: {count}"
+    await update.message.reply_text(text)
+
 
 # 2) Окрема команда для очищення “мертвих” чатів
 @admin_only
