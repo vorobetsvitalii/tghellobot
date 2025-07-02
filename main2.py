@@ -7,6 +7,7 @@ from telegram import (
     InlineKeyboardMarkup,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
+    ChatMember
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -18,6 +19,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     filters,
 )
+from telegram.error import TelegramError, Forbidden
 
 # ===== Конфігурація =====
 ADMIN_IDS = [1833581388, 7082906684]
@@ -113,12 +115,56 @@ async def handle_interest_response(update: Update, context: ContextTypes.DEFAULT
 # ===== Команди адміністраторів =====
 @admin_only
 async def list_clients_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    clients = load_json(CLIENTS_FILE)['clients']
-    if not clients:
+    data = load_json(CLIENTS_FILE)['clients']
+    if not data:
         return await update.message.reply_text("Клієнтів немає.")
-    lines = [f"Зареєстровано: {len(clients)}"] + [c['username'] or str(c['user_id']) for c in clients]
+    lines = [f"🔸 Зареєстровано: {len(data)}"] + [
+        c['username'] or str(c['user_id']) for c in data
+    ]
     await update.message.reply_text("\n".join(lines))
 
+# 2) Окрема команда для очищення “мертвих” чатів
+@admin_only
+async def clean_clients_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    raw = load_json(CLIENTS_FILE)['clients']
+    if not raw:
+        return await update.message.reply_text("У вас немає клієнтів для перевірки.")
+
+    kept = []
+    removed = 0
+
+    for c in raw:
+        uid = c['user_id']
+        try:
+            # 1) Тихий “ping”
+            msg = await context.bot.send_message(
+                chat_id=uid,
+                text=".",
+                disable_notification=True
+            )
+            # 2) Одразу видаляємо цей “ping”
+            await context.bot.delete_message(chat_id=uid, message_id=msg.message_id)
+            # 3) Якщо все гаразд — залишаємо клієнта
+            kept.append(c)
+
+        except Forbidden:
+            # бот заблоковано — видаляємо
+            removed += 1
+
+        except TelegramError:
+            # будь-яка інша помилка теж означає, що чат “мертвий”
+            removed += 1
+
+    # Записуємо назад лише “живих” клієнтів
+    save_json(CLIENTS_FILE, {'clients': kept})
+
+    # Збираємо звіт
+    text = (
+        f"✅ Перевірка завершена.\n"
+        f"🔸 Активних залишилось: {len(kept)}\n"
+        f"🗑 Видалено неактивних: {removed}"
+    )
+    await update.message.reply_text(text)
 @admin_only
 async def get_text_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cfg = load_json(TEXT_FILE)
@@ -241,20 +287,46 @@ async def ask_bcast_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), reply_markup=kb)
     return BCAST_CONFIRM
 
+@admin_only
 async def broadcast_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query; await q.answer()
+    q = update.callback_query
+    await q.answer()
     if q.from_user.id not in ADMIN_IDS:
         return ConversationHandler.END
+
     if q.data == 'bcast_yes':
         msg = context.user_data['bc_message']
-        kb = InlineKeyboardMarkup(
-            [[InlineKeyboardButton(b['text'], url=b['url'])] for b in context.user_data['bc_buttons']]
-        ) if context.user_data['bc_buttons'] else None
-        for c in load_json(CLIENTS_FILE)['clients']:
-            await context.bot.send_message(chat_id=c['user_id'], text=msg, reply_markup=kb)
-        await q.edit_message_text("Розсилка відправлена ✅")
+        kb = (
+            InlineKeyboardMarkup(
+                [[InlineKeyboardButton(b['text'], url=b['url'])] for b in context.user_data['bc_buttons']]
+            )
+            if context.user_data['bc_buttons'] else None
+        )
+
+        clients = load_json(CLIENTS_FILE)['clients']
+        failed = []  # сюди збираємо user_id, яким не вдалося відправити
+
+        for c in clients:
+            uid = c['user_id']
+            try:
+                await context.bot.send_message(chat_id=uid, text=msg, reply_markup=kb)
+            except TelegramError as e:
+                # зберігаємо, щоб потім показати адміну
+                failed.append(uid)
+                # логнемо в консоль або файл
+                logging.warning(f"Не вдалося відправити {uid}: {e}")
+
+        # Остаточне повідомлення адміну
+        success_count = len(clients) - len(failed)
+        text = (
+            f"Розсилка завершена ✅\n"
+            f"✅ Відправлено: {success_count}\n"
+            f"❌ Не вдалося: {len(failed)}"
+        )
+        await q.edit_message_text(text)
     else:
         await q.edit_message_text("Скасовано ❌")
+
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -262,6 +334,24 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Скасовано ❌")
     context.user_data.clear()
     return ConversationHandler.END
+
+@admin_only
+async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        ["/clients", "/clean_unactive_clients"],
+        ["/edittext", "/broadcast"],
+        ["/gettext"]
+    ]
+    markup = ReplyKeyboardMarkup(
+        keyboard,
+        resize_keyboard=True,
+        one_time_keyboard=False
+    )
+    await update.message.reply_text(
+        "🔧 Адмінське меню:\n\n"
+        "Виберіть команду нижче або введіть її вручну:",
+        reply_markup=markup
+    )
 
 # ===== Main =====
 def main():
@@ -301,7 +391,10 @@ def main():
 
     # Admin commands
     app.add_handler(CommandHandler("clients", list_clients_command))
+    app.add_handler(CommandHandler("clean_unactive_clients", clean_clients_command))
     app.add_handler(CommandHandler("gettext", get_text_command))
+    app.add_handler(CommandHandler("menu", menu_command))                       # ← новий хендлер
+
 
     app.run_polling()
 
